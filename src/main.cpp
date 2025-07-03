@@ -3,15 +3,22 @@
 #include <cmath>
 #include <random>
 #include <thread>
+#include <vector>
 using namespace sf;
 
 bool wrap = true;
 
 const float NEIGHBOUR_RADIUS = 25.F;
 
-float separationWeight = 1.5f;
-float alignmentWeight = 1.0f;
-float cohesionWeight = 0.5f;
+float separationWeight = 19.0f;
+float alignmentWeight = 20.0f;
+float cohesionWeight = 22.5f;
+
+const int CELL_SIZE = 50.f;
+const int GRID_WIDTH = 1920 / CELL_SIZE + 1;
+const int GRID_HEIGHT = 1080 / CELL_SIZE + 1;
+
+std::vector<int> grid[GRID_WIDTH][GRID_HEIGHT];
 
 struct Boid {
     Vector2f position;
@@ -42,7 +49,7 @@ struct Boid {
 
 Clock deltaClock;
 
-Boid boids[5000];
+Boid boids[10000];
 
 int boidsCnt = 1000;
 
@@ -63,45 +70,6 @@ bool isAlmostColliding(const Boid &a, const Boid& b)
 	return produsScalar < 0;
 
 }
-
-Vector2f separation(Boid& target)
-{
-    Vector2f steer = { 0.f, 0.f };
-    for (int i = 0; i<boidsCnt; i++)
-    {
-        Boid& boid = boids[i];
-        if (&boid == &target) continue;
-        if (isAlmostColliding(target, boid))
-            steer += target.position - boid.position ;
-    }
-
-    return steer;
-}
-
-Vector2f alignment(Boid& target)
-{
-    Vector2f steer = target.velocity;
-    float count = 1.f;
-
-    for (int i = 0; i < boidsCnt; i++)
-    {
-        Boid& boid = boids[i];
-        if (&boid == &target) continue;
-        Vector2f diff = boid.position - target.position;
-        if (diff.x * diff.x + diff.y * diff.y < 25*25)
-        {
-            steer += boid.velocity;
-            count++;
-        }
-    }
-
-    steer /= count;
-
-    return steer;
-}
-
-
-
 
 
 float PREDATOR_RADIUS = 500.f;
@@ -135,31 +103,51 @@ void Boid::update(float deltaTime)
     Vector2f desiredPosition = this->position;
     float cohesionCount = 1.f;
 
-    for (int i = 0; i < boidsCnt; i++) //using one for loop for all three behaviours. Uglier but faster
+    int cx = this->position.x / CELL_SIZE;
+    int cy = this->position.y / CELL_SIZE;
+
+
+
+    for (int dx = -1; dx <= 1; ++dx)
     {
-        Boid& boid = boids[i];
-        if (&boid == this) continue;
-
-        //SEPARATION
-        if (isAlmostColliding(*this, boid))
-            separationSteer += this->position - boid.position;
-
-        //ALIGMENT
-        Vector2f diff = boid.position - this->position;
-        if (diff.x * diff.x + diff.y * diff.y < 25 * 25)
+        for (int dy = -1; dy <= 1; ++dy)
         {
-            aligmentSteer += boid.velocity;
-            ++aligmentCount;
+            int nx = cx + dx;
+            int ny = cy + dy;
+
+            if (nx < 0 || ny < 0 || nx >= GRID_WIDTH || ny >= GRID_HEIGHT) continue;
+
+            for (int j : grid[nx][ny])
+            {
+                Boid& boid = boids[j];
+                if (&boid == this) continue;
+
+                float dx = boid.position.x - this->position.x;
+                float dy = boid.position.y - this->position.y;
+                float distSq = dx * dx + dy * dy;
+
+                // SEPARATION
+                if (distSq < NEIGHBOUR_RADIUS * NEIGHBOUR_RADIUS &&
+                    ((dx * (this->velocity.x - boid.velocity.x) + dy * (this->velocity.y - boid.velocity.y)) < 0))
+                {
+                    separationSteer += this->position - boid.position;
+                }
+
+                // ALIGNMENT
+                if (distSq < 25.f * 25.f)
+                {
+                    aligmentSteer += boid.velocity;
+                    aligmentCount += 1.f;
+                }
+
+                // COHESION
+                if (distSq < 50.f * 50.f)
+                {
+                    desiredPosition += boid.position;
+                    cohesionCount += 1.f;
+                }
+            }
         }
-
-        //COHESION
-        if (diff.x * diff.x + diff.y * diff.y < 50.f * 50.f)
-        {
-            desiredPosition += boid.position;
-            ++cohesionCount;
-		}
-
-
     }
 
     desiredPosition /= cohesionCount;
@@ -306,11 +294,11 @@ void handleCommands()
         else if (command == "boids")
         {
 			cout << "Current number of boids: " << boidsCnt << '\n';
-            cout << "Enter number of boids you wish to exist (0-5000): ";
+            cout << "Enter number of boids you wish to exist (0-10000): \n";
             cin >> boidsCnt;
             boidsCnt = max(0, boidsCnt);
-            boidsCnt = min(5000, boidsCnt);
-            return;
+            boidsCnt = min(10000, boidsCnt);
+            continue;
         }
         else if (command == "help")
         {
@@ -363,6 +351,22 @@ int main()
 
         window.clear();
         window.draw(fps);
+
+
+        // Clear grid
+        for (int x = 0; x < GRID_WIDTH; ++x)
+            for (int y = 0; y < GRID_HEIGHT; ++y)
+                grid[x][y].clear();
+
+        // Rebuild grid
+        for (int i = 0; i < boidsCnt; ++i)
+        {
+            int cx = boids[i].position.x / CELL_SIZE;
+            int cy = boids[i].position.y / CELL_SIZE;
+
+            if (cx >= 0 && cx < GRID_WIDTH && cy >= 0 && cy < GRID_HEIGHT)
+                grid[cx][cy].push_back(i);
+        }
 
         for (int i = 0; i < boidsCnt; i++)
         {
